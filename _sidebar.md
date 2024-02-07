@@ -1,4 +1,3 @@
-* [首页](README "寄语")
-* [指南](guide)
+* [寄语](README)
 * [spring](/docs/spring/)
 * [vue](/docs/vue/)
