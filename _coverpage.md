@@ -22,7 +22,7 @@
 
 ## 🤝 联系我
 
-<p style="color: #F55555">有任何问题、建议或合作意向，都可以通过邮件[chiatso@163.com](https://github.com/survivems）联系我，
+<p style="color: #F55555">有任何问题、建议或合作意向，都可以通过邮箱[<b style="color: green; font-size: 22px;">chiatso@163.com</b>]联系我，
 期待与你互相交流！</p>
 
 <p style="color: #49C628">感谢你的支持和关注！一起分享、一起成长 🌱💪</p>
