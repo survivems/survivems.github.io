@@ -349,3 +349,113 @@ ServletContextResource 是一个灵活的资源访问机制，它能够处理 We
 
 ## InputStreamResource
 
+InputStreamResource 是 Spring 框架中用于表示给定 InputStream 的资源实现。
+它主要用于那些没有更具体资源实现适用的场景。通常，如果可能的话，更推荐使用 ByteArrayResource 或任何基于文件的资源实现。
+
+与其他资源实现相比，InputStreamResource 描述的是一个已经打开的资源。因此，其 isOpen() 方法返回 true。如果你需要将资源描述符保存在某个地方，或者需要多次读取流，那么不要使用 InputStreamResource。
+
+有几个问题需要注意：
++ InputStreamResource 封装了一个已经打开的 InputStream。这意味着在使用它之前，流已经被打开。这可能会导致一些资源管理上的问题，特别是在需要长时间保持资源打开或在多个地方使用同一资源时。
++ 由于 InputStream 只能被读取一次，因此 InputStreamResource 通常也只能被读取一次。如果你试图多次读取它，将会遇到问题。
++ 使用 InputStreamResource 时，需要特别注意资源管理。确保在使用完资源后正确关闭它，以避免资源泄漏。然而，由于 InputStreamResource 封装的是一个已经打开的流，因此关闭资源可能会更加复杂。
++ 如果可能的话，应该优先使用其他更具体的资源实现，如 ByteArrayResource（用于字节数组）或基于文件的资源实现（如 FileSystemResource 或 UrlResource）。这些实现通常提供更好的资源管理和更高的性能。
+
+尽管有上述限制，但在某些特定场景下，InputStreamResource 可能是唯一可行的选择。例如，当你无法将整个资源加载到内存中，或者无法以文件形式访问资源时，可以考虑使用 InputStreamResource。然而，在这些情况下，需要格外小心以确保正确管理资源并避免潜在的问题。
+
+示例：使用InputStreamSource作为下载资源
+```java
+@RestController  
+public class InputStreamResourceController {  
+  
+    @GetMapping("/download")  
+    public ResponseEntity<Resource> downloadData() throws IOException {  
+        // 模拟动态生成的数据  
+        String data = "This is some dynamic data that the client will download.";  
+        InputStream inputStream = new ByteArrayInputStream(data.getBytes());  
+  
+        // 创建 InputStreamResource  
+        InputStreamResource inputStreamResource = new InputStreamResource(inputStream);  
+  
+        // 设置 HTTP 响应头  
+        HttpHeaders headers = new HttpHeaders();  
+        headers.add("Content-Disposition", "attachment; filename=data.txt");  
+        headers.add("Cache-Control", "no-cache, no-store, must-revalidate");  
+        headers.add("Pragma", "no-cache");  
+        headers.add("Expires", "0");  
+  
+        // 返回 ResponseEntity 包含 InputStreamResource 和响应头  
+        return ResponseEntity.ok()  
+                .headers(headers)  
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)  
+                .contentLength(data.length())  
+                .body(inputStreamResource);  
+    }  
+}
+```
+
+## ByteArrayResource
+
+ByteArrayResource 是 Spring 框架中用于封装给定字节数组的资源实现。它内部使用 ByteArrayInputStream 来提供对字节数组内容的访问。与 InputStreamResource 相比，ByteArrayResource 是可重复读取的，因为字节数组内容在内存中，并且可以多次访问而不需要重新打开或重新创建资源。
+
+示例：
+```java
+@RestController  
+public class ByteArrayResourceController {  
+  
+    @GetMapping("/download")  
+    public ResponseEntity<Resource> downloadData() {  
+        // 模拟一些数据  
+        String data = "This is some static data that the client will download.";  
+        byte[] bytes = data.getBytes();  
+  
+        // 创建 ByteArrayResource  
+        ByteArrayResource byteArrayResource = new ByteArrayResource(bytes);  
+  
+        // 设置 HTTP 响应头（可选）  
+        HttpHeaders headers = new HttpHeaders();  
+        headers.add("Content-Disposition", "attachment; filename=data.txt");  
+  
+        // 返回 ResponseEntity 包含 ByteArrayResource 和响应头  
+        return ResponseEntity.ok()  
+                .headers(headers)  
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)  
+                .contentLength(bytes.length) // 设置内容长度是可选的，但有助于客户端了解响应的大小  
+                .body(byteArrayResource);  
+    }  
+}
+```
+
+在这个示例中，创建了一个简单的 Spring MVC 控制器，其中包含一个 downloadData() 方法。这个方法将静态字符串数据转换为字节数组，并使用 ByteArrayResource 将其封装起来。然后将 ByteArrayResource 实例与适当的 HTTP 响应头一起作为 ResponseEntity 返回给客户端。
+
+由于 ByteArrayResource 内部使用了 ByteArrayInputStream，客户端可以多次读取响应的内容，而不会出现像使用 InputStreamResource 时可能遇到的问题（比如流已经被关闭或读取到末尾）。此外，因为数据已经加载到内存中，所以不需要担心资源管理问题，比如关闭流或处理文件句柄。这使得 ByteArrayResource 成为处理小到中等大小数据的理想选择。然而，对于非常大的数据集，可能需要考虑使用其他类型的资源实现，以避免消耗过多内存。
+
+# ResourceLoader接口
+
+ResourceLoader接口设计用来获取它所加载的资源（Resource），它的接口定义如下：
+```java
+public interface ResourceLoader {
+    /* classpath: */
+	String CLASSPATH_URL_PREFIX = ResourceUtils.CLASSPATH_URL_PREFIX;
+
+    /**
+     * 返回 Resource 指定资源位置的句柄。
+     * 句柄应始终是可重用的资源描述符，允许多次 Resource.getInputStream() 调用。
+     * 必须支持完全限定的 URL，例如“file：C：/test.dat”。
+     * 必须支持类路径伪 URL，例如“classpath:test.dat”。
+     * 应支持相对文件路径，例如“WEB-INF/test.dat”。
+     * （这将是特定于实现的，通常由 *ApplicationContext 实现提供。
+     * 请注意， Resource 句柄并不意味着现有资源;您需要调用 Resource.exists 来检查是否存在。
+     */
+	Resource getResource(String location);
+
+    /**
+     * 公开此ResourceLoader使用的ClassLoader
+     * 需要直接访问的 ClassLoader 客户端可以使用 以统一的方式 ResourceLoader进行访问，而不是依赖于* 线程上下文 ClassLoader。
+    */
+	@Nullable
+	ClassLoader getClassLoader();
+}
+```
+<p style="color: red">所有应用程序上下文都实现 ResourceLoader 接口。</p>
+
+> 待更新...
