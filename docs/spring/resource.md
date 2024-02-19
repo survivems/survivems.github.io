@@ -658,4 +658,174 @@ ApplicationContext ctx =
 
 ## 构建 ClassPathXmlApplicationContext 实例ーー快捷方式
 
-> 内容待更新...
+ClassPathXmlApplicationContext 应用上下文用于从类路径（classpath）中加载 XML 配置文件并创建 Spring 应用的上下文。这个类有多个构造函数，允许开发者以不同的方式提供配置文件的路径。
+
+当提供一个 Class 对象给 ClassPathXmlApplicationContext，它会使用这个类的包名作为基础路径来查找 XML 配置文件。例如，如果你提供了一个名为 com.example.MyClass 的类，那么 ClassPathXmlApplicationContext 会在类路径的 com/example/ 目录下查找 XML 文件。
+
+```java
+ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext(new String[] {"beans.xml"}, MyClass.class);
+```
+
+在这个例子中，ClassPathXmlApplicationContext 会在 com/example/目录下查找名为 beans.xml 的文件。
+
+这种方式的优点是，可以不直接指定 XML 文件的完整路径，而是相对于某个类的包路径来引用它们。这使得代码更加灵活，特别是当项目结构发生变化时，你不需要修改配置文件的路径。
+
+## 应用程序上下文构造器资源路径中的通配符
+
+在 Spring 框架中，ClassPathXmlApplicationContext 和其他 ApplicationContext 实现允许你使用通配符和 Ant 风格的模式来指定资源路径。这提供了很大的灵活性，尤其是在处理多个配置文件或模块化的应用程序时。
+
+当你使用 classpath*: 前缀时，你实际上是告诉 Spring 在类路径下查找所有匹配指定模式的资源。Spring 使用 PathMatcher 实用工具类来解析这些模式，并返回所有匹配的资源。例如，如果你有一个目录结构如下：
+
+```shell
+src/  
+└── main/  
+    ├── java/  
+    │   └── com/  
+    │       └── example/  
+    │           ├── MyApp.java  
+    │           └── MyComponent.java  
+    └── resources/  
+        ├── config/  
+        │   ├── app-context.xml  
+        │   ├── component-a.xml  
+        │   └── component-b.xml  
+        └── lib/  
+            ├── spring-*.jar  
+            └── other-libs/*.jar
+```
+
+假设你想加载 config 目录下的所有 XML 配置文件，你可以使用以下代码：
+
+```java
+ApplicationContext context = new ClassPathXmlApplicationContext("classpath*:config/*.xml");
+```
+
+这里，classpath*:config/*.xml 告诉 Spring 在类路径下查找 config 目录，并加载该目录下所有扩展名为 .xml 的文件。这将会加载 app-context.xml、component-a.xml 和 component-b.xml。
+
+注意，这种通配符机制仅适用于在 ApplicationContext 构造函数中指定的资源路径，或者当你直接使用 PathMatcher 实用工具类层次结构时。它是在构造时解析的，与 Resource 类型本身无关。你不能使用 classpath*: 前缀来构造一个实际的 Resource 对象，因为 Resource 指的是单个资源。
+
+这种机制特别适用于组件风格的应用程序组装，其中各个组件可以将其上下文定义片段发布到众所周知的路径上，然后在创建最终的应用程序上下文时使用带有 classpath*: 前缀的相同路径，从而自动收集所有组件片段。
+
+> 注意点：
+在 Spring 中，`classpath:config/*.xml` 和 `classpath*:config/*.xml` 之间的区别在于它们如何解析和加载类路径上的资源。
+`classpath:config/*.xml`：这个表达式仅搜索默认的类路径（即不包含任何JAR文件的类路径）。它会在类路径的根目录下的 config 文件夹中查找所有扩展名为 .xml 的文件。这通常用于加载位于类路径根目录中的资源文件。
+`classpath*:config/*.xml`：这个表达式搜索整个类路径，包括JAR文件。它会查找所有类路径条目（包括JAR文件和类路径根目录）中的 config 文件夹，并加载其中所有扩展名为 .xml 的文件。这允许你从多个JAR文件或类路径根目录中的 config 文件夹加载配置文件。
+简而言之，`classpath`: 仅搜索类路径的根目录，而 `classpath*`: 搜索整个类路径，包括所有JAR文件。
+使用 `classpath*`: 的好处是，如果你的应用程序是由多个模块或JAR文件组成的，并且每个模块都有自己的配置文件，你可以很容易地从所有这些模块中加载配置文件，而无需指定每个JAR文件的确切路径。这有助于保持配置的灵活性和模块化。
+
+### Ant风格模式
+
+路径位置可以包含 Ant 样式的模式，如下面的示例所示:
+
+```shell
+/WEB-INF/*-context.xml
+com/mycompany/**/applicationContext.xml
+file:C:/some/path/*-context.xml
+classpath:com/mycompany/**/applicationContext.xml
+```
+
+当路径位置包含 Ant 样式的模式时，解析器将遵循更复杂的过程来尝试解析通配符。它为直到最后一个非通配符段的路径生成一个 Resource，并从中获得一个 URL。如果此 URL 不是 jar: URL 或特定于容器的变体(如 WebLogic 中的 zip: 、 WebSphere 中的 wsjar 等) ，则为 java.io。文件从中获取，并用于通过遍历文件系统解析通配符。对于 jar URL，解析器要么获得一个 java.net。或者手动解析 jar URL，然后遍历 jar 文件的内容以解析通配符。
+
+### 对便携性的影响
+
+如果指定的路径已经是一个文件 URL (或者隐式地因为基本 ResourceLoader 是一个文件系统 URL，或者显式地因为它是一个文件系统 URL) ，则保证通配符以一种完全可移植的方式工作。
+
+如果指定的路径是一个类路径位置，解析器必须通过调用 Classloader.getResource ()来获取最后一个非通配符路径段 URL。因为这只是路径的一个节点(而不是最后的文件) ，所以实际上(在 ClassLoader javadoc 中)没有定义在这种情况下返回的 URL 的确切类型。实际上，它始终是一个 java.io。表示目录(其中类路径资源解析为文件系统位置)或某种类型的 jar URL (其中类路径资源解析为 jar 位置)的文件。尽管如此，这个操作仍然存在可移植性方面的问题。
+
+如果为最后一个非通配符段获得了 jar URL，解析器必须能够获得 java.net。使用 JarURLConnection 或手动解析 jar URL，以便能够遍历 jar 的内容并解析通配符。这在大多数环境中都可以工作，但在其他环境中却失败了，我们强烈建议在您依赖它之前，应该在您的特定环境中彻底测试来自 jar 的资源的通配符解析。
+
+### classpath*:前缀
+
+在构造基于 XML 的应用程序上下文时，位置字符串可以使用特殊的类路径 * : 前缀，如下面的示例所示:
+
+```java
+ApplicationContext ctx =
+    new ClassPathXmlApplicationContext("classpath*:conf/appContext.xml");
+```
+
+这个特殊的前缀指定必须获取与给定名称匹配的所有类路径资源(在内部，这实际上是通过调用 ClassLoader.getResources (...)实现的) ，然后合并形成最终的应用程序上下文定义。
+
+> 通配符 classpath*: 的行为依赖于底层 ClassLoader 的 getResources() 方法。由于现代的应用服务器通常提供它们自己的 ClassLoader 实现，因此当处理 JAR 文件时，classpath*: 的行为可能会有所不同。这主要是因为不同的应用服务器可能会对 JAR 文件中的资源加载采用不同的策略。
+一些应用服务器可能允许你配置 ClassLoader 的行为，例如设置父类加载器的委托模型、是否应该扫描 JAR 文件中的资源等。这些设置可能会影响 classpath*: 通配符的行为。
+另外，值得注意的是，ClassLoader 的 getResources() 方法可能会返回类路径上所有匹配的资源，包括那些来自 JAR 文件和类路径根目录的资源。因此，如果你期望只从特定的位置加载资源，你可能需要更精确地指定资源的路径。
+总之，当使用 classpath*: 通配符时，了解你的应用服务器如何实现 ClassLoader 以及如何配置它是非常重要的。如果遇到问题，最好查阅相关文档并进行适当的测试，以确保资源被正确加载。
+
+> 可以将 classpath*: 前缀与位置路径中剩余部分的 PathMatcher 模式结合使用，以进一步细化资源加载的范围。例如，classpath*:META-INF/*-beans.xml 将会加载类路径上所有 META-INF 目录下的以 -beans.xml 结尾的文件。
+在这种情况下，解析策略相对简单：首先，对最后一个非通配符路径段调用 ClassLoader.getResources() 方法，以获取类加载器层次结构中所有匹配的资源。然后，针对每个资源，使用先前描述的 PathMatcher 解析策略来处理通配符子路径。
+这意味着，如果你有一个复杂的目录结构，并且只想加载满足特定模式的资源，你可以使用 classpath*: 前缀结合 PathMatcher 模式来实现。例如，如果你想加载所有位于 META-INF 目录下，并且文件名以 -beans.xml 结尾的 XML 文件，无论这些文件位于类路径的哪个 JAR 包或目录中，你都可以使用上述模式来实现。
+这里有一个重要的点需要注意：当使用 classpath*: 前缀时，PathMatcher 模式仅应用于最后一个路径段之后的部分。在前面的例子中，META-INF 是非通配符部分，而 *-beans.xml 是通配符模式，它将会匹配所有以 -beans.xml 结尾的文件。
+总之，通过将 classpath*: 前缀与 PathMatcher 模式结合使用，你可以非常灵活地加载类路径上的资源，无论它们位于哪里，只要它们符合指定的模式即可。这为大型应用程序或模块化应用程序中的资源加载提供了很大的便利。
+
+### 与通配符有关的其他要点
+
+注意：涉及到 classpath*: 与 Ant 风格模式结合使用时的一个潜在限制。当你使用 classpath*: 与 Ant 风格模式（如 *.xml）结合时，确保模式前面至少有一个根目录是非常重要的。这是因为在处理 JAR 文件时，ClassLoader.getResources() 方法可能不会返回位于 JAR 文件根部的资源，而只会返回展开目录根部的资源。
+
+这是因为 JAR 文件本质上是一个压缩的归档文件，其中的资源被压缩在内部，并不直接对应文件系统上的位置。因此，当使用 classpath*: 加载 JAR 文件中的资源时，通常需要指定至少一个目录级别的路径，以便 ClassLoader 能够定位到正确的资源。
+
+Spring 框架通过 JDK 的 ClassLoader.getResources() 方法来检索类路径条目。这个方法对于空字符串（表示要搜索的潜在根目录）只返回文件系统位置。Spring 还会评估 URLClassLoader 的运行时配置以及 JAR 文件中的 java.class.path 清单，但这并不保证在所有情况下都能产生可移植的行为。
+
+因此，最佳实践是当使用 classpath*: 与 Ant 风格模式结合时，确保你的模式前面有一个或多个明确的目录或包路径。这样可以提高加载资源的可靠性，并确保在不同的环境和应用服务器中行为一致。如果你需要加载 JAR 文件根部的资源，你可能需要明确指定 JAR 文件的路径，或者考虑将资源移动到可访问的目录路径下。
+
+> 类路径包的扫描需要类路径中存在相应的目录条目。当你使用 Ant 构建 JAR 文件时，不要激活 JAR 任务的仅文件开关，因为这可能会导致类路径上的目录条目不被包含在内。
+另外，在某些环境中，基于安全策略，类路径目录可能不会暴露出来。例如，在 JDK 1.7.0_45 及更高版本的独立应用程序中，需要在清单文件中设置 'Trusted-Library' 才能访问类路径目录。这可能会影响 ClassLoader.getResources() 的行为，因为它可能无法找到位于类路径目录中的资源。
+在 JDK 9 的模块路径（Jigsaw）上，Spring 的类路径扫描通常可以按预期工作。同样，推荐将资源放入专门的目录中，以避免前面提到的在 JAR 文件根级别搜索时可能出现的可移植性问题。
+总之，为了确保资源能够正确加载，你需要注意以下几点：
+在构建 JAR 文件时，确保包含必要的目录条目。
+避免激活 JAR 任务的仅文件开关。
+在需要访问类路径目录的环境中，确保已正确设置安全策略（如 'Trusted-Library'）。
+在 JDK 9 的模块路径上，推荐将资源放入专门的目录中。
+遵循这些建议可以帮助你避免常见的资源加载问题，并确保你的应用程序在不同的 Java 版本和环境中具有一致的行为。
+如果要搜索的根包在多个类路径位置可用，则不能保证使用 classspath: 资源 的 Ant 样式模式能够找到匹配的资源。考虑下面的资源位置示例:
+
+```shell
+com/mycompany/package1/service-context.xml
+```
+
+现在考虑一个 Ant 风格的路径，有人可能会用它来寻找那个文件:
+
+```shell
+classpath:com/mycompany/**/service-context.xml
+```
+
+这样的资源可能只存在于类路径中的一个位置，但是当使用前面的示例之类的路径来解析它时，解析器将依赖于 getResource (“com/mycompany”); 返回的(第一个) URL。如果此基本包节点存在于多个 ClassLoader 位置，则所需的资源可能不存在于所找到的第一个位置。因此，在这种情况下，您应该更喜欢使用 classspath* : 具有相同的 Ant 风格模式，该模式搜索包含 com.mycompany 基本包的所有类路径位置: classspath*:com/mycompany/**/service-context.xml。
+
+## FileSystemResource 注意事项
+
+未附加到 FileSystemApplicationContext (即，当 FileSystemApplicationContext 不是实际的 ResourceLoader 时)的 FileSystemResource 按照您预期的方式处理绝对路径和相对路径。相对路径是相对于当前工作目录的，而绝对路径是相对于文件系统的根的。
+
+但是，由于向后兼容性(历史)原因，当 FileSystemApplicationContext 是 ResourceLoader 时，这种情况会发生变化。FileSystemApplicationContext 强制所有附加的 FileSystemResource 实例将所有位置路径视为相对路径，无论它们是否以斜杠开头。在实践中，这意味着下列例子是等价的:
+
+```java
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("conf/context.xml");
+```
+
+```java
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("/conf/context.xml");
+```
+
+下面的例子也是等价的(即使它们有所不同也是有意义的，因为一种情况是相对的，而另一种情况是绝对的) :
+
+```java
+FileSystemXmlApplicationContext ctx = ...;
+ctx.getResource("some/resource/path/myTemplate.txt");
+```
+
+```java
+FileSystemXmlApplicationContext ctx = ...;
+ctx.getResource("/some/resource/path/myTemplate.txt");
+```
+
+实际上，如果需要真正的绝对文件系统路径，应该避免使用 FileSystemResource 或 FileSystemXmlApplicationContext 的绝对路径，并通过使用 file: URL 前缀强制使用 UrlResource。下面的例子说明了如何做到这一点:
+
+```java
+// actual context type doesn't matter, the Resource will always be UrlResource
+ctx.getResource("file:///some/resource/path/myTemplate.txt");
+```
+
+```java
+// force this FileSystemXmlApplicationContext to load its definition via a UrlResource
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("file:///conf/context.xml");
+```
