@@ -424,4 +424,354 @@ public class MyWebAppInitializer extends AbstractDispatcherServletInitializer {
 
 ### DispatcherServlet处理流程
 
-> 待更新...
+DispatcherServlet处理请求按照如下步骤进行：
+
++ 在请求中搜索 WebApplicationContext 上下文并将其绑定到请求作用域，以便控制器和流程中的其他元素使用。默认情况下，WebApplicationContext绑定在key为 `DispatcherServlet.WEB_APPLICATION_CONTEXT_ATTRIBUTE`的请求作用域下
+
++ 将区域设置解析器（LocaleResolver）绑定到请求，让流程中的元素在处理请求(呈现视图、准备数据等)时解析要使用的区域设置。如果不需要区域设置解析器，则不需要区域设置解析器。默认情况下绑定在key为`DispatcherServlet.LOCALE_RESOLVER_ATTRIBUTE`的请求作用域
+
++ 将主题解析器（ThemeResolver）绑定到请求，让视图等元素确定使用具体主题。如果不使用主题，则可以忽略它。默认情况下，将主题解析器绑定在key为`DispatcherServlet.THEME_RESOLVER_ATTRIBUTE`的请求作用域
+
++ 如果指定了文件上传文件解析器（MultipartResolver），则将检查请求是否是文件上传请求。若是则将请求包装在 `MultipartHttpServletRequest`
+
++ 查询适当的处理程序。如果找到处理程序，则运行与处理程序(预处理程序、后处理程序和控制器)关联的执行链，以准备呈现模型。
+
++ 如果返回模型，则呈现视图。如果没有返回任何模型(可能是由于预处理器或后处理器拦截了请求，可能是出于安全原因) ，则不会呈现任何视图，因为请求可能已经完成。
+
+WebApplicationContext 中声明的 `HandlerExceptionResolver` bean对象用于解决请求处理过程中抛出的异常。这些异常解决程序允许自定义逻辑来处理异常。
+
+此外，通过向 web.xml 文件中的 Servlet 声明添加 Servlet 初始化参数(init-param 元素)来定制单个 DispatcherServlet 实例。下面是 DispatcherServlet支持的可配置参数：
+
+1. contextClass：实现 ConfigurableWebApplicationContext 的类类型，该类将由此 Servlet 实例化并在本地配置。
+
+2. contextConfigLocation：传递给上下文实例(由 contextClass 指定)的字符串，用于指示可以在哪里找到上下文。该字符串可能由多个字符串组成(使用逗号作为分隔符) ，以支持多个上下文。对于具有两次定义的 bean 的多个上下文位置，最新位置优先。
+
+3. namespace：WebApplicationContext 的命名空间。默认为[`servlet-name`]-servlet。
+
+4. throwExceptionIfNoHandlerFound：当未找到请求的处理程序时，是否引发 NoHandlerFoundException。然后可以使用 HandlerExceptionResolver捕获异常，并作为其他异常进行处理。默认情况下，被设置为 false，在这种情况下，DispatcherServlet 将响应状态设置为404(NOT_FOEND) ，而不引发异常。<font style="color: red">请注意，如果还配置了默认的 servlet 处理，未解决的请求总是被转发到默认的 servlet，并且永远不会引发404。</font>
+
+### 路径匹配
+
+<font style="color: red">Servlet API 将完整的请求路径公开为 requestURI，并进一步将其细分为 contextPath、 servletPath 和 pathInfo，它们的值根据 Servlet 映射的方式而变化。</font>在Spring MVC中，处理请求的查找路径通常是DispatcherServlet映射路径中的一个部分，它不包括contextPath和任何servletMapping前缀。为了确定这个查找路径，Spring MVC需要解码servletPath和pathInfo，但这可能会导致问题，因为解码后的路径可能包含一些特殊字符，如"/"或";"，这些字符在编码后可能会改变路径的结构，甚至引发安全问题。
+
+这就是为什么在Servlet 3.1及以上版本中，当DispatcherServlet被映射为默认Servlet（即使用"/"或"/*"作为映射路径），并且Servlet容器版本为4.0及以上时，Spring MVC能够检测到Servlet映射类型，从而避免使用servletPath和pathInfo。在Servlet 3.1的容器中，你可以通过配置UrlPathHelper的alwaysUseFullPath属性为true来实现类似的效果。
+
+然而，即使在这种情况下，requestURI仍然需要被解码以便与控制器映射进行比较。这仍然可能导致问题，因为如果路径中包含可能会改变路径结构的特殊字符。如果这些字符不被期望出现，那么可以进行拒绝处理，例如Spring Security的HTTP防火墙就可以实现这一点。
+
+总的来说，最佳实践是避免依赖servletPath，并尽可能使用DispatcherServlet的默认映射（即"/"或"/*"）。同时，需要谨慎处理路径中的特殊字符，以防止潜在的安全问题。
+
+### 拦截器
+
+Spring MVC提供的HandlerMapping都支持拦截器，以便在某些特殊的请求处理过程中执行额外的逻辑，比如检查身份。拦截器定义要求实现`HandlerInterceptor`接口，该接口有3个方法用于在目标方法执行前后执行额外功能逻辑。
+
++ preHandle(..)：目标处理器执行前置执行
+
++ postHandle(..)：目标处理器执行后置执行
+
++ afterCompletion(..)：整个请求链执行完成后置执行
+
+`preHandle(..)`方法返回一个布尔值。可以使用此方法中断或继续执行链的处理。当此方法返回 true 时，处理程序执行链继续。当它返回 false 时，DispatcherServlet 假设拦截器本身已经处理了请求(例如，呈现了一个适当的视图) ，并且不继续执行执行链中的其他拦截器和实际处理程序。
+
+`postHandle(..)` 方法对于使用 @ResponseBody 和 ResponseEntity 注解的方法来说不那么有用，因为这些方法的响应已经在 HandlerAdapter 内部被写入并提交，而且是在 postHandle 执行之前。这意味着在 postHandle 执行时，对响应进行任何修改（例如添加额外的头部）都已经太晚了。对于这样的场景，您可以实现 ResponseBodyAdvice 接口，并将其声明为一个 Controller Advice bean，或者直接在 RequestMappingHandlerAdapter 上进行配置。如下示例：
+```java
+@ControllerAdvice  
+public class CustomResponseBodyAdvice implements ResponseBodyAdvice<Object> {  
+  
+    @Override  
+    public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {  
+        // 这里可以定义哪些方法需要应用此ResponseBodyAdvice  
+        return true;  
+    }  
+  
+    @Override  
+    public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,  
+                                  Class<? extends HttpMessageConverter<?>> selectedConverterType,  
+                                  ServerHttpRequest request, ServerHttpResponse response) {  
+          
+        // 在这里可以对响应体进行修改  
+        // 例如，您可以检查body的类型，并根据需要添加额外的头部
+        return body;  
+    }  
+}
+```
+> 添加上述代码后，无论控制器方法是否使用@ResponseBody或ResponseEntity，您都可以通过ResponseBodyAdvice对响应体进行修改。
+
+### 异常
+
+如果在请求映射期间发生异常，或者从请求处理程序(比如@Controller)抛出异常，DispatcherServlet 将委托给 `HandlerExceptionResolver` 的bean链来解决异常并提供替代处理，这通常是一个错误响应。
+
+Spring MVC提供以下内置 HandlerExceptionResolver 实现：
+
++ SimpleMappingExceptionResolver：异常类名称和错误视图名称之间的映射。用于在浏览器应用程序中呈现错误页面。
+
++ DefaultHandlerExceptionResolver：解析 SpringMVC 引发的异常并将它们映射到 HTTP 状态代码。另请参阅其他 ResponseEntityExceptionHandler 和 RESTAPI 异常。
+
++ ResponseStatusExceptionResolver：使用@ResponseStatus 注释解析异常，并根据注释中的值将它们映射到 HTTP 状态代码。
+
++ ExceptionHandlerExceptionResolver：通过在@Controller 或@ControllerAdvisory 类中调用@ExceptionHandler 方法来解决异常。
+
+#### 异常解析链
+
+通过在 Spring 配置中声明多个 HandlerExceptionResolver bean 并根据需要设置它们的`order`属性，可以形成异常解析器链。`order`属性越大，异常解析器的位置就越晚。
+
+HandlerExceptionResolver 的约定指定它可以返回:
+
++ 指向错误视图的 ModelAndView
+
++ 如果在解析器中处理了异常，则为空的 ModelAndView。
+
++ 如果异常仍未解析，则为 null，以便后续的解析器可以尝试，如果异常保持在结尾，则允许它冒泡到 Servlet 容器。
+
+<font style="color: red">MVC Config 会自动声明针对默认 Spring MVC 异常，比如@ResponseStatus 注解和@ExceptionHandler 方法的内置异常解析器。</font>
+
+#### Servlet容器错误页面
+
+<font style="color: red">如果一个异常仍然没有被任何 HandlerExceptionResolver 解决，因此留待传播，或者如果响应状态被设置为错误状态(即4xx，5xx) ，Servlet 容器可以呈现 HTML 中的默认错误页面。要自定义容器的默认错误页面，可以在 web.xml 中声明错误页面映射。</font>下面的示例说明如何做到这一点:
+
+```xml
+<error-page>
+    <location>/error</location>
+</error-page>
+```
+
+给定前面的例子，当异常冒泡或响应具有错误状态时，Servlet 容器在容器内对配置的 URL (例如/ERROR)进行 ERROR 分派。然后由 DispatcherServlet 处理，可能将其映射到@Controller，这可以实现为返回带有模型的错误视图名称或呈现 JSON 响应，如下面的示例所示:
+
+```java
+@RestController
+public class ErrorController {
+
+    @RequestMapping(path = "/error")
+    public Map<String, Object> handle(HttpServletRequest request) {
+        Map<String, Object> map = new HashMap<String, Object>();
+        map.put("status", request.getAttribute("javax.servlet.error.status_code"));
+        map.put("reason", request.getAttribute("javax.servlet.error.message"));
+        return map;
+    }
+}
+```
+
+> ServletAPI 没有提供在 Java 中创建错误页面映射的方法。但是，您可以同时使用 WebApplicationInitializer 和 web.xml。
+
+### 视图解析
+
+Spring MVC 定义了 ViewResolver 和 View 接口，允许其在浏览器中呈现模型，而无需依赖于特定的视图技术。ViewResolver 提供了视图名称和实际视图之间的映射。视图解决了在移交给特定视图技术之前数据的准备问题。Spring MVC提供了以下内置ViewResolver实现：
+
++ AbstractCachingViewResolver：AbstractCachingViewResolver是一个抽象类，它为视图解析提供了缓存机制。它的子类（如UrlBasedViewResolver、ResourceBundleViewResolver、FreeMarkerViewResolver等）通常会缓存它们解析得到的视图实例。
+> 视图缓存机制可以提高使用某些视图技术（如JSP、FreeMarker、Thymeleaf等）时的性能。当视图解析器解析一个视图名称时，它首先会检查缓存中是否已经有对应的视图实例。如果有，则直接返回缓存中的实例，避免了重复解析的开销。如果没有，解析器会创建一个新的视图实例，并将其添加到缓存中，以便后续使用。然而，有时候你可能需要关闭缓存，或者在运行时刷新缓存中的某个视图。为此，AbstractCachingViewResolver提供了相应的功能：
+> 1. 关闭缓存：你可以通过设置cache属性为false来关闭缓存机制。这样，每次解析视图时都会创建一个新的视图实例，而不会检查缓存。
+> ```java
+> viewResolver.setCache(false);
+> ```
+> 注意：关闭缓存可能会降低性能，特别是在解析视图成本较高的情况下。
+> 2. 刷新缓存视图：如果需要在运行时刷新某个特定的视图（例如，当FreeMarker模板被修改时），你可以使用removeFromCache(String viewName, Locale loc)方法。这个方法会从缓存中移除与给定视图名称和区域设置相对应的视图实例。下次解析该视图时，将重新创建并缓存一个新的实例。
+> ```java
+> viewResolver.removeFromCache("myViewName", new Locale("en", "US"));
+> ```
+> 注意：removeFromCache方法通常在你知道视图内容已经改变并且希望立即反映这些改变时使用。在大多数情况下，你可能不需要手动刷新缓存，因为视图解析器会在需要时自动重新解析视图。然而，在某些特定情况下（如动态生成的模板），手动刷新可能是必要的。
+
++ UrlBasedViewResolver：ViewResolver 接口的简单实现，该接口在没有显式映射定义的情况下直接将逻辑视图名称解析为 URL，而不需要任意映射，那么这样做是合适的。
+> 1. SimpleUrlBasedViewResolver：使用SimpleUrlBasedViewResolver时，逻辑视图名称通常与URL路径直接对应。例如，如果你有一个逻辑视图名称home，SimpleUrlBasedViewResolver会尝试查找一个URL，该URL的路径与home相对应。这通常是通过在URL路径前加上一个前缀和后缀来构造完整的URL。
+>```java
+>@Configuration  
+>public class WebConfig implements WebMvcConfigurer {  
+>  
+>    @Bean  
+>    public ViewResolver viewResolver() {  
+>        SimpleUrlBasedViewResolver resolver = new SimpleUrlBasedViewResolver();  
+>        resolver.setPrefix("/WEB-INF/views/"); // 设置视图前缀  
+>        resolver.setSuffix(".jsp"); // 设置视图后缀  
+>        return resolver;  
+>    }  
+>}
+>```
+> 在这个例子中，如果控制器返回一个逻辑视图名称home，SimpleUrlBasedViewResolver会尝试查找/WEB-INF/views/home.jsp这个路径下的JSP视图。它不适合那些需要复杂映射逻辑或视图技术之间需要不同处理的场景。对于这些情况，你可能需要使用更高级别的视图解析器，如UrlBasedViewResolver或自定义的ViewResolver实现。
+> 2. UrlBasedViewResolver：UrlBasedViewResolver 通过 URL 模式来解析视图名称，而不是像 SimpleUrlBasedViewResolver 那样直接拼接前缀和后缀。
+> UrlBasedViewResolver 通常用于更复杂的场景，其中视图名称并不直接对应于文件路径，而是需要通过一定的模式来映射。这种模式可以是简单的路径模式，也可以是包含占位符的模式，以便在解析时动态地替换掉占位符。
+>```java
+>@Configuration  
+>@EnableWebMvc  
+>public class WebConfig implements WebMvcConfigurer {  
+>  
+>    @Bean  
+>    public ViewResolver viewResolver() {  
+>        UrlBasedViewResolver resolver = new UrlBasedViewResolver();  
+>        resolver.setPrefix("/WEB-INF/views/"); // 设置视图前缀  
+>        resolver.setSuffix(".jsp"); // 设置视图后缀  
+>        resolver.setViewClass(JstlView.class); // 设置视图类，对于JSP通常是JstlView  
+>        return resolver;  
+>    }  
+>}
+>```
+> 在这个例子中，UrlBasedViewResolver 被配置为使用 /WEB-INF/views/ 作为视图的前缀，.jsp 作为视图的后缀，并且使用 JstlView 作为视图类（对于JSP视图通常是必要的）。这意味着，如果控制器返回一个逻辑视图名称 home，UrlBasedViewResolver 会尝试解析这个名称，并找到对应的 JSP 文件 /WEB-INF/views/home.jsp。
+> UrlBasedViewResolver 还可以配置更复杂的 URL 模式。例如，你可以使用 {viewName}.jsp 作为视图名称的模式，这样 viewName 就会作为占位符被动态替换：
+>```java
+>resolver.setViewNames("*"); // 设置要解析的视图名称模式  
+>resolver.setOrder(0); // 设置视图解析器的顺序
+>```
+> 在这个配置中，"*" 表示 UrlBasedViewResolver 将解析所有视图名称。setOrder 方法用于设置视图解析器的顺序，多个视图解析器可能存在于同一个应用程序中，order 值较小的解析器将首先被尝试。
+> 需要注意的是，虽然 UrlBasedViewResolver 提供了比 SimpleUrlBasedViewResolver 更灵活的视图解析机制，但它也需要更多的配置，并且不如 SimpleUrlBasedViewResolver 那样直观和简单。在大多数情况下，如果逻辑视图名称可以直接映射到资源路径，使用 SimpleUrlBasedViewResolver 就足够了。如果需要更复杂的映射规则，可以考虑使用 UrlBasedViewResolver。
+
+
++ InternalResourceViewResolver：InternalResourceViewResolver 是 Spring MVC 框架中用于解析 JSP、HTML、XHTML 等视图的一种视图解析器。它是 UrlBasedViewResolver 的一个子类，专门用于解析内部资源视图，如 JSP 文件。InternalResourceViewResolver 将逻辑视图名称解析为具体的资源路径，并生成一个 InternalResourceView 对象，该对象封装了对资源路径的引用。
+> 在配置 InternalResourceViewResolver 时，通常需要指定视图的前缀和后缀。前缀和后缀与逻辑视图名称结合，生成最终的资源路径。例如，如果逻辑视图名称为 home，前缀为 /WEB-INF/views/，后缀为 .jsp，则 InternalResourceViewResolver 将解析为 /WEB-INF/views/home.jsp。
+> InternalResourceViewResolver 还支持使用 JSTL（JavaServer Pages Standard Tag Library）标签库。如果 JSP 文件中使用了 JSTL 标签，InternalResourceViewResolver 会将视图名称解析为 JstlView 类型的对象，从而能够正确处理和渲染 JSTL 标签。
+>```java
+>@Configuration  
+>@EnableWebMvc  
+>public class WebConfig implements WebMvcConfigurer {  
+>  
+>    @Bean  
+>    public ViewResolver viewResolver() {  
+>        InternalResourceViewResolver resolver = new InternalResourceViewResolver();  
+>        resolver.setPrefix("/WEB-INF/views/"); // 设置视图前缀  
+>        resolver.setSuffix(".jsp"); // 设置视图后缀  
+>        resolver.setExposeContextBeansAsAttributes(true); // 将 model 中的属性暴露为请求属性  
+>        return resolver;  
+>    }  
+>}
+>```
+> 在这个例子中，InternalResourceViewResolver 被配置为使用 /WEB-INF/views/ 作为视图的前缀，.jsp 作为视图的后缀。setExposeContextBeansAsAttributes(true) 表示将模型中的属性作为请求属性暴露给视图，这样在 JSP 文件中就可以直接访问这些属性了。
+> 需要注意的是，InternalResourceViewResolver 通常用于解析 JSP 视图。如果你的应用程序中使用了其他类型的视图技术（如 Thymeleaf、FreeMarker 等），你可能需要使用对应的视图解析器。此外，InternalResourceViewResolver 在解析视图时并不执行任何逻辑，它只是根据配置的前缀、后缀和逻辑视图名称生成资源路径。实际的视图渲染工作是由 JSP 引擎（如 Tomcat 中的 JSP 容器）来完成的。
+
++ FreeMarkerViewResolver：FreeMarkerViewResolver 是 Spring MVC 框架中用于解析 FreeMarker 模板视图的一种视图解析器。它是 UrlBasedViewResolver 的子类，专门用于将控制器返回的逻辑视图名称解析为 FreeMarker 模板视图。
+> FreeMarkerViewResolver 的主要作用是将逻辑视图名称映射到 FreeMarker 模板文件。在配置 FreeMarkerViewResolver 时，通常需要指定模板文件的前缀和后缀，以及模板文件所在的路径。当控制器返回一个逻辑视图名称时，FreeMarkerViewResolver 会根据配置的前缀、后缀和逻辑视图名称来构建模板文件的完整路径，并加载该模板文件来渲染视图。
+> 与 InternalResourceViewResolver 类似，FreeMarkerViewResolver 也支持通过配置来暴露模型中的属性为请求属性，以便在模板文件中可以直接访问这些属性。
+>```java
+>@Configuration  
+>@EnableWebMvc  
+>public class WebConfig implements WebMvcConfigurer {  
+>  
+>    @Bean  
+>    public ViewResolver viewResolver() {  
+>        FreeMarkerViewResolver resolver = new FreeMarkerViewResolver();  
+>        resolver.setPrefix("/WEB-INF/freemarker/"); // 设置模板文件的前缀  
+>        resolver.setSuffix(".ftl"); // 设置模板文件的后缀  
+>        resolver.setTemplateLoaderPath("/WEB-INF/freemarker/"); // 设置模板文件所在的路径  
+>        resolver.setExposeContextBeansAsAttributes(true); // 将模型中的属性暴露为请求属性  
+>        resolver.setContentType("text/html;charset=UTF-8"); // 设置响应的内容类型  
+>        resolver.setOrder(0); // 设置视图解析器的顺序  
+>        return resolver;  
+>    }  
+>}
+>```
+>在这个例子中，FreeMarkerViewResolver 被配置为使用 /WEB-INF/freemarker/ 作为模板文件的前缀和路径，.ftl 作为模板文件的后缀。setExposeContextBeansAsAttributes(true) 表示将模型中的属性作为请求属性暴露给模板，setContentType("text/html;charset=UTF-8") 设置了响应的内容类型为 HTML 并指定了字符集为 UTF-8。
+>需要注意的是，FreeMarkerViewResolver 仅适用于使用 FreeMarker 作为模板引擎的应用程序。如果你的应用程序中使用了其他模板引擎（如 Thymeleaf、Velocity 等），你需要使用对应的视图解析器。此外，FreeMarkerViewResolver 在解析视图时并不执行任何逻辑，它只是根据配置的前缀、后缀和逻辑视图名称构建模板文件的路径，并加载模板文件。实际的模板渲染工作是由 FreeMarker 引擎来完成的。
+
++ ContentNegotiatingViewResolver：基于请求文件名或 Accept 头解析视图的 ViewResolver 接口的实现。
+
++ BeanNameViewResolver：在当前应用程序上下文中将视图名称解释为 bean 名称的 ViewResolver 接口的实现。这是一个非常灵活的变体，它允许基于不同的视图名称混合和匹配不同的视图类型。每个这样的视图都可以定义为一个 bean，例如在 XML 或配置类中。
+
+#### 处理解析
+
+可以通过声明多个解析器 bean 来链接视图解析器，如果需要，还可以通过设置 order 属性来指定排序。请记住，订单属性越大，视图解析器在链中的位置就越晚。
+
+ViewResolver 的约定指定它可以返回 null 以指示无法找到视图。但是，对于 JSP 和 InternalResourceViewResolver，判断 JSP 是否存在的唯一方法是通过 RequestDispatcher 执行调度。因此，<font style="color: red">必须始终将 InternalResourceViewResolver 配置为视图解析器总顺序的最后一个。</font>
+
+配置视图解析非常简单，只需将 ViewResolverbean 添加到 Spring 配置中即可。MVC 配置为视图解析器和添加无逻辑视图控制器提供了专用的配置 API，这些 API 对于 HTML 模板呈现而不需要控制器逻辑非常有用。
+
+#### 重定向
+
+视图名称中的特殊 `redirect:` 前缀允许执行重定向。UrlBasedViewResolver (及其子类)将其识别为需要重定向的指令。视图名称的其余部分是重定向 URL。
+
+实际效果与控制器返回 RedirectView 的情况相同，但是现在控制器本身可以根据逻辑视图名称进行操作。逻辑视图名称(如 `redirect:/myapp/some/resource`)相对于当前 Servlet 上下文进行重定向，而 `redirect: https://myhost.com/some/arbitrary/path` 等名称则重定向到绝对 URL。
+
+<font style="color: red">注意，如果控制器方法使用`@ResponseStatus` 进行注解，则注解值优先于 RedirectView 设置的响应状态。</font>
+
+#### 转发
+
+可以为最终由 UrlBasedViewResolver 和子类解析的视图名称使用特殊的 `·`forward:` 前缀。这将创建一个 InternalResourceView，它执行 RequestDispatcher.forward ()。因此，这个前缀对于 InternalResourceViewResolver 和 InternalResourceView (对于 JSP)没有用处，但是如果您使用其他视图技术，但是仍然希望强制转发一个要由 Servlet/JSP 引擎处理的资源，那么这个前缀会很有帮助。注意，可以链接多个视图解析器。
+
+#### 内容协商
+
+ContentCommeratingViewResolver 不解析视图本身，而是委托给其他视图解析器，并选择与客户端请求的表示类似的视图。可以从 Accept 头或查询参数(例如，“/path? format = pdf”)确定表示形式。
+
+通过比较请求媒体类型和媒体类型(也称为 Content-Type) ，Content洽谈视图解析器选择一个适当的视图来处理请求。媒体类型由与其每个视图解析器相关联的视图支持。列表中具有兼容 Content-Type 的第一个视图将表示形式返回给客户端。如果 ViewResolver 链不能提供兼容的视图，则查阅通过 DefaultView 属性指定的视图列表。后一个选项适用于单例视图，它可以呈现当前资源的适当表示形式，而不管逻辑视图名称如何。Accept 头部可以包括通配符(例如 text/*) ，在这种情况下，Content-Type 为 text/xml 的视图是兼容的匹配。
+
+### 本地化
+
+Spring 架构的大多数部分都支持国际化，就像 Spring Web MVC 框架一样。DispatcherServlet 允许您使用客户端的区域设置自动解析消息。这是通过 LocaleResolver 对象完成的。
+
+当请求进入时，DispatcherServlet 查找区域设置解析器，如果找到了，它将尝试使用它来设置区域设置。通过使用 RequestContext.getLocale ()方法，您始终可以检索由区域设置解析器解析的区域设置。
+
+除了自动地区解析之外，您还可以将一个拦截器附加到处理程序映射(参见拦截器以获得更多关于处理程序映射拦截器的信息) ，以便在特定情况下(例如，基于请求中的参数)更改地区。
+
+语言环境解析器和拦截器在 org.springframework.web.servlet.i18n 包中定义，并以正常方式在应用程序上下文中配置。Spring 中包含以下区域设置解析器选项。
+
++ 时区
+
++ 头部解析
+
++ cookie解析
+
++ session解析
+
++ 本地化拦截器
+
+#### 时区
+
+除了获取客户机的语言环境之外，了解其时区通常也很有用。LocaleContextResolver 接口提供了 LocaleResolver 的扩展，允许解析器提供更丰富的 LocaleContext，其中可能包含时区信息。
+
+如果可用，可以使用 RequestContext.getTimeZone ()方法获取用户的 TimeZone。任何在 Spring 的 ConversonService 中注册的 Date/Time Converter 和 Formatter 对象都会自动使用时区信息。
+
+#### 头部解析
+
+此区域设置解析器检查客户端(例如，Web 浏览器)发送的请求中的接受语言标头。通常，这个头字段包含客户机操作系统的区域设置。请注意，此冲突解决程序不支持时区信息。
+
+#### cookie解析
+
+此区域设置解析器检查客户端上可能存在的 Cookie，以查看是否指定了区域设置或时区。如果是，则使用指定的详细信息。通过使用此区域设置解析器的属性，可以指定 Cookie 的名称以及最大年龄。下面的示例定义 CookieLocaleResolver:
+
+```java
+<bean id="localeResolver" class="org.springframework.web.servlet.i18n.CookieLocaleResolver">
+
+    <property name="cookieName" value="clientlanguage"/>
+
+    <!-- in seconds. If set to -1, the cookie is not persisted (deleted when browser shuts down) -->
+    <property name="cookieMaxAge" value="100000"/>
+
+</bean>
+```
+
+下面列举了 CookieLocaleResolver 属性:
+
++ cookieName：cookie名，默认值是`classname + LOCALE`
+
++ cookieMaxAge：Cookie 在客户端上保持的最长时间。如果指定了 -1，Cookie 将不会被持久化。它只有在客户端关闭浏览器之后才可用。默认使用Servlet容器cookie最大存活时间
+
++ cookiePath：将 Cookie 的可见性限制为站点的某个部分。指定 CookiePath 时，Cookie 只对该路径及其下方的路径可见。默认值`/`
+
+#### session解析
+
+SessionLocaleResolver 允许您从可能与用户请求关联的会话中检索 Locale 和 TimeZone。与 CookieLocaleResolver 不同，此策略将本地选择的区域设置存储在 Servlet 容器的 HttpSession 中。因此，这些设置对于每个会话都是临时的，因此在每个会话结束时丢失。
+
+请注意，与外部会话管理机制(如 SpringSession 项目)没有直接关系。此 SessionLocaleResolver 根据当前 HttpServletRequest 计算和修改相应的 HttpSession 属性。
+
+#### 本地化拦截器
+
+可以通过将 `LocaleChangeInterceptor` 添加到 HandlerMapping 定义之一来启用区域设置的更改。它检测请求中的一个参数，并相应地更改区域设置，在调度程序的应用程序上下文中调用 LocaleResolver 上的 setLocale 方法。下一个示例显示对 all* 的调用。查看包含名为 siteLanguage 的参数的资源现在更改区域设置。因此，举例来说，一个请求的网址， https://www.sf.net/home.view?sitelanguage=nl ，改变了网站语言的荷兰语。下面的示例演示如何拦截区域设置:
+
+```java
+<bean id="localeChangeInterceptor"
+        class="org.springframework.web.servlet.i18n.LocaleChangeInterceptor">
+    <property name="paramName" value="siteLanguage"/>
+</bean>
+
+<bean id="localeResolver"
+        class="org.springframework.web.servlet.i18n.CookieLocaleResolver"/>
+
+<bean id="urlMapping"
+        class="org.springframework.web.servlet.handler.SimpleUrlHandlerMapping">
+    <property name="interceptors">
+        <list>
+            <ref bean="localeChangeInterceptor"/>
+        </list>
+    </property>
+    <property name="mappings">
+        <value>/**/*.view=someController</value>
+    </property>
+</bean>
+```
+
+### 主题
+
+> 内容待更新...
